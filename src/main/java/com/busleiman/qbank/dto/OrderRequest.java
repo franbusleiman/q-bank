@@ -8,6 +8,6 @@ import lombok.Data;
 public class OrderRequest {
     private String buyerDni;
     private String sellerDni;
-    private String usdAmount;
-    private String javaCoinPrice;
+    private Long usdAmount;
+    private Long javaCoinPrice;
 }

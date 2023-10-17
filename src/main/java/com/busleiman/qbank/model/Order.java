@@ -9,5 +9,9 @@ import org.springframework.data.annotation.Id;
 public class Order {
     @Id
     private String id;
+    private String buyerDni;
+    private String sellerDni;
+    private  Long usdAmount;
+    private Long javaCoinPrice;
     private OrderState orderState;
 }
