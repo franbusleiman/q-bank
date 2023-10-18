@@ -10,6 +10,7 @@ public class BankAccount {
 
     @Id
     private String userDNI;
+
     private Long usd;
 
 }
