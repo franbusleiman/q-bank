@@ -11,19 +11,24 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Connection;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import lombok.extern.slf4j.Slf4j;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.SerializationUtils;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.rabbitmq.OutboundMessage;
+import reactor.rabbitmq.QueueSpecification;
 import reactor.rabbitmq.Receiver;
+import reactor.rabbitmq.Sender;
 
 import java.nio.charset.StandardCharsets;
 
+
 @Service
+@Slf4j
 public class OrderService {
 
     @Autowired
@@ -33,17 +38,21 @@ public class OrderService {
     @Autowired
     private Mono<Connection> connectionMono;
     private final Receiver receiver;
+    private final Sender sender;
     @Autowired
     private final ModelMapper modelMapper;
     private static final String QUEUE = "Francisco";
+    private static final String QUEUE2 = "Francisco2";
+
     private ObjectMapper objectMapper = new ObjectMapper();
 
     public OrderService(BankAccountRepository bankAccountRepository, OrderRepository orderRepository,
-                        ModelMapper modelMapper, Receiver receiver) {
+                        ModelMapper modelMapper, Receiver receiver, Sender sender) {
         this.bankAccountRepository = bankAccountRepository;
         this.orderRepository = orderRepository;
         this.modelMapper = modelMapper;
         this.receiver = receiver;
+        this.sender = sender;
     }
 
     @PostConstruct
@@ -95,10 +104,32 @@ public class OrderService {
                                             .usdAmount(usdTotal)
                                             .build();
                                     return orderRepository.save(order)
-                                            .map(order1 ->{
-                                             WalletRequest walletRequest=    modelMapper.map(order1, WalletRequest.class)  ;
+                                            .map(order1 -> {
+                                                WalletRequest walletRequest = modelMapper.map(order1, WalletRequest.class);
 
                                                 System.out.printf(String.valueOf(walletRequest));
+
+                                                String json1;
+                                                try {
+                                                    json1 = objectMapper.writeValueAsString(walletRequest);
+
+                                                    byte[] orderSerialized = SerializationUtils.serialize(json1);
+
+                                                    Flux<OutboundMessage> outbound = Flux.just(new OutboundMessage(
+                                                            "",
+                                                            QUEUE2, orderSerialized));
+
+                                                    // Declare the queue then send the flux of messages.
+                                                    sender
+                                                            .declareQueue(QueueSpecification.queue(QUEUE2))
+                                                            .thenMany(sender.sendWithPublishConfirms(outbound))
+                                                            .subscribe(m -> {
+                                                                System.out.println("Message sent");
+                                                            });
+
+                                                } catch (JsonProcessingException e) {
+                                                    throw new RuntimeException(e);
+                                                }
 
                                                 return walletRequest;
                                             });

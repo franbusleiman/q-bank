@@ -14,9 +14,8 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.r2dbc.connection.init.ConnectionFactoryInitializer;
 import org.springframework.r2dbc.connection.init.ResourceDatabasePopulator;
 import reactor.core.publisher.Mono;
-import reactor.rabbitmq.RabbitFlux;
-import reactor.rabbitmq.Receiver;
-import reactor.rabbitmq.ReceiverOptions;
+import reactor.core.scheduler.Schedulers;
+import reactor.rabbitmq.*;
 
 import static io.r2dbc.spi.ConnectionFactoryOptions.*;
 
@@ -44,6 +43,18 @@ public class RabbitConfig {
     @Bean
     Receiver receiver(ReceiverOptions receiverOptions) {
         return RabbitFlux.createReceiver(receiverOptions);
+    }
+
+    @Bean
+    public SenderOptions senderOptions(Mono<Connection> connectionMono) {
+        return new SenderOptions()
+                .connectionMono(connectionMono)
+                .resourceManagementScheduler(Schedulers.boundedElastic());
+    }
+
+    @Bean
+    public Sender sender(SenderOptions senderOptions) {
+        return RabbitFlux.createSender(senderOptions);
     }
 
 }
