@@ -9,6 +9,8 @@ import com.busleiman.qbank.repository.OrderRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Connection;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +27,7 @@ import reactor.rabbitmq.Receiver;
 import reactor.rabbitmq.Sender;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Date;
 
 
 @Service
@@ -67,24 +70,17 @@ public class OrderService {
 
 
     public Disposable consume() {
-        System.out.println("paso");
 
         return receiver.consumeAutoAck(QUEUE).flatMap(message -> {
 
             String json = new String(message.getBody(), StandardCharsets.UTF_8);
-            System.out.println(json);
-
             OrderRequest orderRequest;
-
 
             try {
                 orderRequest = objectMapper.readValue(json, OrderRequest.class);
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
             }
-
-
-            System.out.println(orderRequest);
 
             return bankAccountRepository.findById(orderRequest.getBuyerDni())
                     .flatMap(bankAccount -> {
@@ -107,34 +103,46 @@ public class OrderService {
                                             .map(order1 -> {
                                                 WalletRequest walletRequest = modelMapper.map(order1, WalletRequest.class);
 
-                                                System.out.printf(String.valueOf(walletRequest));
+                                                Flux<OutboundMessage> outbound = outboundMessage(walletRequest);
 
-                                                String json1;
-                                                try {
-                                                    json1 = objectMapper.writeValueAsString(walletRequest);
-
-                                                    byte[] orderSerialized = SerializationUtils.serialize(json1);
-
-                                                    Flux<OutboundMessage> outbound = Flux.just(new OutboundMessage(
-                                                            "",
-                                                            QUEUE2, orderSerialized));
-
-                                                    // Declare the queue then send the flux of messages.
-                                                    sender
-                                                            .declareQueue(QueueSpecification.queue(QUEUE2))
-                                                            .thenMany(sender.sendWithPublishConfirms(outbound))
-                                                            .subscribe(m -> {
-                                                                System.out.println("Message sent");
-                                                            });
-
-                                                } catch (JsonProcessingException e) {
-                                                    throw new RuntimeException(e);
-                                                }
-
-                                                return walletRequest;
+                                                return sender
+                                                        .declareQueue(QueueSpecification.queue(QUEUE2))
+                                                        .thenMany(sender.sendWithPublishConfirms(outbound))
+                                                        .subscribe();
                                             });
                                 });
                     }).switchIfEmpty(Mono.error(new Exception("User not found")));
         }).subscribe();
     }
+
+
+    private Flux<OutboundMessage> outboundMessage(WalletRequest walletRequest) {
+
+        String json1;
+        try {
+            json1 = objectMapper.writeValueAsString(walletRequest);
+
+            long now = System.currentTimeMillis();
+            long expirationTime = now + 3600000;
+            String subject = walletRequest.getBuyerDni();
+
+            String jwt = Jwts.builder()
+                    .setSubject(subject)
+                    .setIssuedAt(new Date(now))
+                    .setExpiration(new Date(expirationTime))
+                    .signWith(SignatureAlgorithm.HS256, "mySecretKey1239876123456123123123123132131231")
+                    .claim("message", json1)
+                    .compact();
+
+            return Flux.just(new OutboundMessage(
+                    "",
+                    QUEUE2,
+                    jwt.getBytes()));
+
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
 }
+
