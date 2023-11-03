@@ -85,8 +85,16 @@ public class OrderService {
 
             return bankAccountRepository.findById(orderRequest.getBuyerDni())
                     .flatMap(bankAccount -> {
+                        Long usdTotal;
 
-                        Long usdTotal = (long) (orderRequest.getUsdAmount() * 1.05);
+                        if(bankAccount.getOrdersExecuted()<3){
+                             usdTotal = (long) (orderRequest.getUsdAmount() * 1.05);
+                        }
+                        else if(bankAccount.getOrdersExecuted() <6){
+                             usdTotal = (long) (orderRequest.getUsdAmount() * 1.03);
+                        } else {
+                            usdTotal = (long) (orderRequest.getUsdAmount());
+                        }
 
                         if (usdTotal <= bankAccount.getUsd()) {
                             bankAccount.setUsd(bankAccount.getUsd() - usdTotal);
