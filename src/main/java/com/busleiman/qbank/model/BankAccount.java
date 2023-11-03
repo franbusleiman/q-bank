@@ -13,4 +13,6 @@ public class BankAccount {
 
     private Long usd;
 
+    private Long ordersExecuted;
+
 }
