@@ -18,7 +18,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.util.SerializationUtils;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -142,7 +141,7 @@ public class OrderService {
 
                                         buyerAccount.setUsd((long) (buyerAccount.getUsd() + order.getUsdAmount() * 1.05));
 
-                                      return  bankAccountRepository.save(buyerAccount)
+                                        return bankAccountRepository.save(buyerAccount)
                                                 .then(orderRepository.save(order))
 
                                                 .map(order1 -> {
