@@ -44,7 +44,7 @@ public class OrderService {
     private final Sender sender;
     @Autowired
     private final ModelMapper modelMapper;
-    private static final String QUEUE = "Francisco";
+    private static final String QUEUE = "queue-B";
     private static final String QUEUE2 = "Francisco2";
 
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -61,7 +61,6 @@ public class OrderService {
     @PostConstruct
     private void init() {
         consume();
-        consume2();
     }
 
     @PreDestroy
@@ -75,6 +74,7 @@ public class OrderService {
         return receiver.consumeAutoAck(QUEUE).flatMap(message -> {
 
             String json = new String(message.getBody(), StandardCharsets.UTF_8);
+            System.out.println(json);
             OrderRequest orderRequest;
 
             try {
