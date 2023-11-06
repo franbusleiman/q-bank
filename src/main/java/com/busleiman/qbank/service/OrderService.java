@@ -203,26 +203,14 @@ public class OrderService {
 
     private Flux<OutboundMessage> outboundMessage(Object message) {
 
-        String json1;
+        String json;
         try {
-            json1 = objectMapper.writeValueAsString(message);
-
-            long now = System.currentTimeMillis();
-            long expirationTime = now + 3600000;
-            String subject = "bank-service";
-
-            String jwt = Jwts.builder()
-                    .setSubject(subject)
-                    .setIssuedAt(new Date(now))
-                    .setExpiration(new Date(expirationTime))
-                    .signWith(SignatureAlgorithm.HS256, "mySecretKey1239876123456123123123123132131231")
-                    .claim("message", json1)
-                    .compact();
+            json = objectMapper.writeValueAsString(message);
 
             return Flux.just(new OutboundMessage(
                     "",
                     QUEUE2,
-                    jwt.getBytes()));
+                    json.getBytes()));
 
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
