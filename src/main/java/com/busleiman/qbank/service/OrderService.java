@@ -2,7 +2,6 @@ package com.busleiman.qbank.service;
 
 import com.busleiman.qbank.dto.OrderConfirmation;
 import com.busleiman.qbank.dto.OrderRequest;
-import com.busleiman.qbank.dto.WalletRequest;
 import com.busleiman.qbank.model.Order;
 import com.busleiman.qbank.model.OrderState;
 import com.busleiman.qbank.repository.BankAccountRepository;
@@ -10,8 +9,6 @@ import com.busleiman.qbank.repository.OrderRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Connection;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +24,6 @@ import reactor.rabbitmq.Receiver;
 import reactor.rabbitmq.Sender;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Date;
 
 
 @Service
@@ -45,7 +41,8 @@ public class OrderService {
     @Autowired
     private final ModelMapper modelMapper;
     private static final String QUEUE = "queue-B";
-    private static final String QUEUE2 = "Francisco2";
+    private static final String QUEUE2 = "queue-D";
+    private static final String QUEUE3 = "queue-E";
 
     private ObjectMapper objectMapper = new ObjectMapper();
 
@@ -61,6 +58,7 @@ public class OrderService {
     @PostConstruct
     private void init() {
         consume();
+        consume2();
     }
 
     @PreDestroy
@@ -74,7 +72,6 @@ public class OrderService {
         return receiver.consumeAutoAck(QUEUE).flatMap(message -> {
 
             String json = new String(message.getBody(), StandardCharsets.UTF_8);
-            System.out.println(json);
             OrderRequest orderRequest;
 
             try {
@@ -86,51 +83,59 @@ public class OrderService {
             return bankAccountRepository.findById(orderRequest.getBuyerDni())
                     .flatMap(bankAccount -> {
                         Long usdTotal;
+                        Long buyerCommission;
 
-                        if(bankAccount.getOrdersExecuted()<3){
-                             usdTotal = (long) (orderRequest.getUsdAmount() * 1.05);
-                        }
-                        else if(bankAccount.getOrdersExecuted() <6){
-                             usdTotal = (long) (orderRequest.getUsdAmount() * 1.03);
+                        if (bankAccount.getOrdersExecuted() < 3) {
+                            usdTotal = (long) (orderRequest.getUsdAmount() * 1.05);
+                            buyerCommission = (long) 1.05;
+                        } else if (bankAccount.getOrdersExecuted() < 6) {
+                            usdTotal = (long) (orderRequest.getUsdAmount() * 1.03);
+                            buyerCommission = (long) 1.03;
                         } else {
-                            usdTotal = (long) (orderRequest.getUsdAmount());
+                            usdTotal = (orderRequest.getUsdAmount());
+                            buyerCommission = (long) 0;
+
                         }
 
                         if (usdTotal <= bankAccount.getUsd()) {
                             bankAccount.setUsd(bankAccount.getUsd() - usdTotal);
+
+                            return bankAccountRepository.save(bankAccount)
+                                    .flatMap(bankAccount1 -> {
+                                        Order order = Order.builder()
+                                                .id(orderRequest.getId())
+                                                .javaCoinPrice(orderRequest.getJavaCoinPrice())
+                                                .orderState(OrderState.IN_PROGRESS)
+                                                .buyerDni(orderRequest.getBuyerDni())
+                                                .usdAmount(orderRequest.getUsdAmount())
+                                                .buyerCommission(buyerCommission)
+                                                .build();
+                                        return orderRepository.save(order);
+                                    });
+                        } else {
+                            Order order = Order.builder()
+                                    .id(orderRequest.getId())
+                                    .javaCoinPrice(orderRequest.getJavaCoinPrice())
+                                    .orderState(OrderState.NOT_ACCEPTED)
+                                    .buyerDni(orderRequest.getBuyerDni())
+                                    .usdAmount(orderRequest.getUsdAmount())
+                                    .build();
+                            return orderRepository.save(order)
+                                    .map(order1 ->{
+                                        System.out.println(order1);
+                                        return order1;
+                                    } );
                         }
-                        return bankAccountRepository.save(bankAccount)
-                                .flatMap(bankAccount1 -> {
-                                    Order order = Order.builder()
-                                            .javaCoinPrice(orderRequest.getJavaCoinPrice())
-                                            .orderState(OrderState.IN_PROGRESS)
-                                            .sellerDni(orderRequest.getSellerDni())
-                                            .buyerDni(orderRequest.getBuyerDni())
-                                            .usdAmount(usdTotal)
-                                            .build();
-                                    return orderRepository.save(order)
-                                            .map(order1 -> {
-                                                WalletRequest walletRequest = modelMapper.map(order1, WalletRequest.class);
-
-                                                Flux<OutboundMessage> outbound = outboundMessage(walletRequest);
-
-                                                return sender
-                                                        .declareQueue(QueueSpecification.queue(QUEUE2))
-                                                        .thenMany(sender.sendWithPublishConfirms(outbound))
-                                                        .subscribe();
-                                            });
-                                });
                     }).switchIfEmpty(Mono.error(new Exception("User not found")));
         }).subscribe();
     }
 
     public Disposable consume2() {
 
-        return receiver.consumeAutoAck(QUEUE).flatMap(message -> {
+        return receiver.consumeAutoAck("queue-F").flatMap(message -> {
 
             String json = new String(message.getBody(), StandardCharsets.UTF_8);
             OrderConfirmation orderConfirmation;
-
             try {
                 orderConfirmation = objectMapper.readValue(json, OrderConfirmation.class);
             } catch (JsonProcessingException e) {
@@ -140,14 +145,14 @@ public class OrderService {
             return orderRepository.findById(orderConfirmation.getId())
                     .flatMap(order -> {
 
-                        if (orderConfirmation.getOrderState().equals(OrderState.NOT_ACCEPTED)) {
+                        if (orderConfirmation.getOrderState().equals("NOT_ACCEPTED")) {
 
                             order.setOrderState(OrderState.NOT_ACCEPTED);
 
                             return bankAccountRepository.findById(order.getBuyerDni())
                                     .flatMap(buyerAccount -> {
 
-                                        buyerAccount.setUsd((long) (buyerAccount.getUsd() + order.getUsdAmount() * 1.05));
+                                        buyerAccount.setUsd(buyerAccount.getUsd() + order.getUsdAmount() * order.getBuyerCommission());
 
                                         return bankAccountRepository.save(buyerAccount)
                                                 .then(orderRepository.save(order))
@@ -155,36 +160,51 @@ public class OrderService {
                                                 .map(order1 -> {
                                                     OrderConfirmation orderConfirmation1 = modelMapper.map(order, OrderConfirmation.class);
 
-                                                    Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1);
+                                                    Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE3);
 
                                                     return sender
-                                                            .declareQueue(QueueSpecification.queue(QUEUE2))
+                                                            .declareQueue(QueueSpecification.queue(QUEUE3))
                                                             .thenMany(sender.sendWithPublishConfirms(outbound))
                                                             .subscribe();
                                                 });
                                     });
 
-                        } else if (orderConfirmation.getOrderState().equals(OrderState.ACCEPTED)) {
+                        } else if (orderConfirmation.getOrderState().equals("ACCEPTED")) {
 
-                            bankAccountRepository.findById(order.getSellerDni())
+                            order.setOrderState(OrderState.ACCEPTED);
+                            order.setSellerDni(orderConfirmation.getSellerDni());
+
+                       return     bankAccountRepository.findById(order.getSellerDni())
                                     .flatMap(sellerAccount -> {
 
                                         return bankAccountRepository.findById(order.getBuyerDni())
                                                 .flatMap(buyerAccount -> {
-                                                    sellerAccount.setUsd(sellerAccount.getUsd() + order.getUsdAmount());
+
+                                                    Long usdTotal;
+                                                    if (sellerAccount.getOrdersExecuted() < 3) {
+                                                        usdTotal = (long) (order.getUsdAmount() * 1.05);
+                                                    } else if (sellerAccount.getOrdersExecuted() < 6) {
+                                                        usdTotal = (long) (order.getUsdAmount() * 1.03);
+                                                    } else {
+                                                        usdTotal = (order.getUsdAmount());
+                                                    }
+                                                    sellerAccount.setUsd(sellerAccount.getUsd() + usdTotal);
+                                                    sellerAccount.setOrdersExecuted(sellerAccount.getOrdersExecuted() + 1);
+                                                    buyerAccount.setOrdersExecuted(buyerAccount.getOrdersExecuted() + 1);
 
                                                     return bankAccountRepository.save(sellerAccount)
-                                                            .flatMap(voidResult -> {
+                                                            .then(bankAccountRepository.save(buyerAccount))
+                                                            .flatMap(result -> {
                                                                 order.setOrderState(OrderState.ACCEPTED);
 
                                                                 return orderRepository.save(order)
                                                                         .map(order1 -> {
                                                                             OrderConfirmation orderConfirmation1 = modelMapper.map(order, OrderConfirmation.class);
 
-                                                                            Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1);
+                                                                            Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE3);
 
                                                                             return sender
-                                                                                    .declareQueue(QueueSpecification.queue(QUEUE2))
+                                                                                    .declareQueue(QueueSpecification.queue(QUEUE3))
                                                                                     .thenMany(sender.sendWithPublishConfirms(outbound))
                                                                                     .subscribe();
                                                                         });
@@ -201,7 +221,7 @@ public class OrderService {
     }
 
 
-    private Flux<OutboundMessage> outboundMessage(Object message) {
+    private Flux<OutboundMessage> outboundMessage(Object message, String queue) {
 
         String json;
         try {
@@ -209,7 +229,7 @@ public class OrderService {
 
             return Flux.just(new OutboundMessage(
                     "",
-                    QUEUE2,
+                    queue,
                     json.getBytes()));
 
         } catch (JsonProcessingException e) {

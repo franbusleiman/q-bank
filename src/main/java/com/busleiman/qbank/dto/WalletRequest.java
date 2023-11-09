@@ -10,5 +10,5 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @SuperBuilder
 public class WalletRequest extends OrderRequest {
-    private String orderId;
+    private Long id;
 }

@@ -11,7 +11,7 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @SuperBuilder
 public class OrderRequest {
-    private String id;
+    private Long id;
     private String buyerDni;
     private String sellerDni;
     private Long usdAmount;
