@@ -27,6 +27,8 @@ import reactor.rabbitmq.Sender;
 
 import java.nio.charset.StandardCharsets;
 
+import static com.busleiman.qbank.utils.Constants.*;
+
 
 @Service
 @Slf4j
@@ -42,9 +44,6 @@ public class OrderService {
     private final Sender sender;
     @Autowired
     private final ModelMapper modelMapper;
-    private static final String QUEUE = "queue-B";
-    private static final String QUEUE2 = "queue-D";
-    private static final String QUEUE3 = "queue-E";
 
     private ObjectMapper objectMapper = new ObjectMapper();
 
@@ -71,7 +70,7 @@ public class OrderService {
 
     public Disposable consume() {
 
-        return receiver.consumeAutoAck(QUEUE).flatMap(message -> {
+        return receiver.consumeAutoAck(QUEUE_B).flatMap(message -> {
 
             String json = new String(message.getBody(), StandardCharsets.UTF_8);
             OrderRequest orderRequest;
@@ -122,11 +121,7 @@ public class OrderService {
                                     .buyerDni(orderRequest.getBuyerDni())
                                     .usdAmount(orderRequest.getUsdAmount())
                                     .build();
-                            return orderRepository.save(order)
-                                    .map(order1 ->{
-                                        System.out.println(order1);
-                                        return order1;
-                                    } );
+                            return orderRepository.save(order);
                         }
                     }).switchIfEmpty(Mono.error(new Exception("User not found")));
         }).subscribe();
@@ -134,7 +129,7 @@ public class OrderService {
 
     public Disposable consume2() {
 
-        return receiver.consumeAutoAck("queue-F").flatMap(message -> {
+        return receiver.consumeAutoAck(QUEUE_F).flatMap(message -> {
 
             String json = new String(message.getBody(), StandardCharsets.UTF_8);
             OrderConfirmation orderConfirmation;
@@ -162,9 +157,9 @@ public class OrderService {
                                                 .map(order1 -> {
                                                     OrderConfirmation orderConfirmation1 = modelMapper.map(order, OrderConfirmation.class);
 
-                                                    Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE3);
+                                                    Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE_E, QUEUES_EXCHANGE);
 
-                                                    return sender.sendWithPublishConfirms(outbound)
+                                                    return sender.send(outbound)
                                                             .subscribe();
                                                 });
                                     });
@@ -201,9 +196,9 @@ public class OrderService {
                                                                         .map(order1 -> {
                                                                             OrderConfirmation orderConfirmation1 = modelMapper.map(order, OrderConfirmation.class);
 
-                                                                            Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE3);
+                                                                            Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE_E, QUEUES_EXCHANGE);
 
-                                                                            return sender.sendWithPublishConfirms(outbound)
+                                                                            return sender.send(outbound)
                                                                                     .subscribe();
                                                                         });
                                                             });
@@ -217,15 +212,15 @@ public class OrderService {
     }
 
 
-    private Flux<OutboundMessage> outboundMessage(Object message, String queue) {
+    private Flux<OutboundMessage> outboundMessage(Object message, String routingKey, String exchange) {
 
         String json;
         try {
             json = objectMapper.writeValueAsString(message);
 
             return Flux.just(new OutboundMessage(
-                    "",
-                    queue,
+                    exchange,
+                    routingKey,
                     json.getBytes()));
 
         } catch (JsonProcessingException e) {
