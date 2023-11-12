@@ -9,7 +9,6 @@ import com.busleiman.qbank.repository.OrderRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Connection;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.modelmapper.ModelMapper;
@@ -21,7 +20,6 @@ import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.rabbitmq.OutboundMessage;
-import reactor.rabbitmq.QueueSpecification;
 import reactor.rabbitmq.Receiver;
 import reactor.rabbitmq.Sender;
 
@@ -145,6 +143,8 @@ public class OrderService {
                         if (orderConfirmation.getOrderState().equals("NOT_ACCEPTED")) {
 
                             order.setOrderState(OrderState.NOT_ACCEPTED);
+                            order.setSellerDni(orderConfirmation.getSellerDni());
+
 
                             return bankAccountRepository.findById(order.getBuyerDni())
                                     .flatMap(buyerAccount -> {
@@ -153,14 +153,10 @@ public class OrderService {
 
                                         return bankAccountRepository.save(buyerAccount)
                                                 .then(orderRepository.save(order))
-
                                                 .map(order1 -> {
                                                     OrderConfirmation orderConfirmation1 = modelMapper.map(order, OrderConfirmation.class);
-
-                                                    Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE_E, QUEUES_EXCHANGE);
-
-                                                    return sender.send(outbound)
-                                                            .subscribe();
+                                                    orderConfirmation1.setErrorDescription(orderConfirmation.getErrorDescription());
+                                                    return orderConfirmation1;
                                                 });
                                     });
 
@@ -169,7 +165,7 @@ public class OrderService {
                             order.setOrderState(OrderState.ACCEPTED);
                             order.setSellerDni(orderConfirmation.getSellerDni());
 
-                       return     bankAccountRepository.findById(order.getSellerDni())
+                            return bankAccountRepository.findById(order.getSellerDni())
                                     .flatMap(sellerAccount -> {
 
                                         return bankAccountRepository.findById(order.getBuyerDni())
@@ -193,24 +189,36 @@ public class OrderService {
                                                                 order.setOrderState(OrderState.ACCEPTED);
 
                                                                 return orderRepository.save(order)
-                                                                        .map(order1 -> {
-                                                                            OrderConfirmation orderConfirmation1 = modelMapper.map(order, OrderConfirmation.class);
-
-                                                                            Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE_E, QUEUES_EXCHANGE);
-
-                                                                            return sender.send(outbound)
-                                                                                    .subscribe();
-                                                                        });
+                                                                        .map(order1 -> modelMapper.map(order, OrderConfirmation.class));
                                                             });
-                                                }).switchIfEmpty(Mono.error(new Exception("User not found")));
+                                                }).switchIfEmpty(orderConfirmationError(order.getId(),
+                                                        orderConfirmation.getSellerDni(), "User not found: " + order.getBuyerDni()));
                                     });
                         }
-                        return Mono.error(new Exception("Order Status unknown: " + orderConfirmation.getOrderState()));
+                        return orderConfirmationError(order.getId(),
+                                orderConfirmation.getSellerDni(), "Order status unknown: " + orderConfirmation.getOrderState());
 
-                    }).switchIfEmpty(Mono.error(new Exception("User not found")));
+                    }).switchIfEmpty(orderConfirmationError(orderConfirmation.getId(),
+                            orderConfirmation.getSellerDni(), "Order not found: " + orderConfirmation.getId()))
+
+                    .map(orderConfirmation1 -> {
+                        Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE_E, QUEUES_EXCHANGE);
+
+                        return sender.send(outbound)
+                                .subscribe();
+                    });
         }).subscribe();
     }
 
+
+    public Mono<OrderConfirmation> orderConfirmationError(Long orderId, String sellerDni, String error) {
+        return Mono.just(OrderConfirmation.builder()
+                .id(orderId)
+                .orderState("NOT_ACCEPTED")
+                .sellerDni(sellerDni)
+                .errorDescription(error)
+                .build());
+    }
 
     private Flux<OutboundMessage> outboundMessage(Object message, String routingKey, String exchange) {
 
@@ -227,6 +235,5 @@ public class OrderService {
             throw new RuntimeException(e);
         }
     }
-
 }
 
