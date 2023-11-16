@@ -79,6 +79,8 @@ public class OrderService {
                 throw new RuntimeException(e);
             }
 
+            System.out.println(json);
+
             return bankAccountRepository.findById(orderRequest.getBuyerDni())
                     .flatMap(bankAccount -> {
                         Long usdTotal;
@@ -104,7 +106,7 @@ public class OrderService {
                                         Order order = Order.builder()
                                                 .id(orderRequest.getId())
                                                 .javaCoinPrice(orderRequest.getJavaCoinPrice())
-                                                .orderState(OrderState.IN_PROGRESS)
+                                                .orderState(OrderState.ACCEPTED)
                                                 .buyerDni(orderRequest.getBuyerDni())
                                                 .usdAmount(orderRequest.getUsdAmount())
                                                 .buyerCommission(buyerCommission)
@@ -121,7 +123,15 @@ public class OrderService {
                                     .build();
                             return orderRepository.save(order);
                         }
-                    }).switchIfEmpty(Mono.error(new Exception("User not found")));
+                    })
+                    .map(order -> modelMapper.map(order, OrderConfirmation.class))
+                    .switchIfEmpty(orderConfirmationError(orderRequest.getId(), null, "User not found: " + orderRequest.getBuyerDni()))
+                    .map(orderConfirmation1-> {
+                        System.out.println(orderConfirmation1);
+                        Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE_H, QUEUES_EXCHANGE);
+                        return sender.send(outbound)
+                                .subscribe();
+                    });
         }).subscribe();
     }
 
@@ -140,7 +150,7 @@ public class OrderService {
             return orderRepository.findById(orderConfirmation.getId())
                     .flatMap(order -> {
 
-                        if (orderConfirmation.getOrderState().equals("NOT_ACCEPTED")) {
+                        if (orderConfirmation.getOrderState() == OrderState.NOT_ACCEPTED) {
 
                             order.setOrderState(OrderState.NOT_ACCEPTED);
                             order.setSellerDni(orderConfirmation.getSellerDni());
@@ -160,7 +170,7 @@ public class OrderService {
                                                 });
                                     });
 
-                        } else if (orderConfirmation.getOrderState().equals("ACCEPTED")) {
+                        } else if (orderConfirmation.getOrderState() == OrderState.ACCEPTED) {
 
                             order.setOrderState(OrderState.ACCEPTED);
                             order.setSellerDni(orderConfirmation.getSellerDni());
@@ -214,7 +224,7 @@ public class OrderService {
     public Mono<OrderConfirmation> orderConfirmationError(Long orderId, String sellerDni, String error) {
         return Mono.just(OrderConfirmation.builder()
                 .id(orderId)
-                .orderState("NOT_ACCEPTED")
+                .orderState(OrderState.NOT_ACCEPTED)
                 .sellerDni(sellerDni)
                 .errorDescription(error)
                 .build());
