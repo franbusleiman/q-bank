@@ -67,7 +67,16 @@ public class OrderService {
     }
 
 
-
+    /**
+     * Se recibe el mensaje order request por parte del servicio Web.
+     * Se chequea si el usuario comprador existe, se calcula el total de dólares de la operación,
+     * y la comisión que deberá pagar el comprador.
+     * <p>
+     * Si el saldo del comprador es suficiente, se guarda el mismo y se registra la orden,
+     * si el saldo no es suficiente, se registra la orden fallida y se envía el mensaje de fondos
+     * insuficientes.
+     * Finalmente se se envía el mensaje de confirmación al servicio Web.
+     */
     public Flux<Void> consume() {
 
         return receiver.consumeAutoAck(QUEUE_B).flatMap(message -> {
@@ -139,6 +148,19 @@ public class OrderService {
         });
     }
 
+    /**
+     * Se recibe el mensaje order confirmation por parte del servicio Wallet.
+     *<p>
+     * Se chequea el estado de aceptado o no aceptado.
+     * <p>
+     * En el caso de que NO se acepto, se actualiza el estado de la orden y en el caso de que el error
+     * no sea saldo insuficiente, se devuelve el dinero al comprador.
+     * <p>
+     * En el caso de que SI se acepto, se actualiza el estado de la orden, se le paga al vendedor el saldo,
+     * y se aumenta la cantidad de operaciones realizadas tanto a comprador como a vendedor.
+     *<p>
+     * Finalmente se envía la confirmación al servicio Web.
+     */
     public Flux<Void> consume2() {
 
         return receiver.consumeAutoAck(QUEUE_F).flatMap(message -> {
