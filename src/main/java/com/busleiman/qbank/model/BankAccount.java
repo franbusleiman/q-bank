@@ -11,7 +11,7 @@ public class BankAccount {
     @Id
     private String userDNI;
 
-    private Long usd;
+    private Double usd;
 
     private Long ordersExecuted;
 

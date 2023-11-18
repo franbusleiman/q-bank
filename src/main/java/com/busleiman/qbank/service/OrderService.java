@@ -24,6 +24,7 @@ import reactor.rabbitmq.Receiver;
 import reactor.rabbitmq.Sender;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 
 import static com.busleiman.qbank.utils.Constants.*;
 
@@ -56,8 +57,8 @@ public class OrderService {
 
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
-        consume();
-        consume2();
+        consume().subscribe();
+        consume2().subscribe();
     }
 
     @PreDestroy
@@ -66,7 +67,8 @@ public class OrderService {
     }
 
 
-    public Disposable consume() {
+
+    public Flux<Void> consume() {
 
         return receiver.consumeAutoAck(QUEUE_B).flatMap(message -> {
 
@@ -79,22 +81,20 @@ public class OrderService {
                 throw new RuntimeException(e);
             }
 
-            System.out.println(json);
-
             return bankAccountRepository.findById(orderRequest.getBuyerDni())
                     .flatMap(bankAccount -> {
-                        Long usdTotal;
-                        Long buyerCommission;
+                        Double usdTotal;
+                        Double buyerCommission;
 
                         if (bankAccount.getOrdersExecuted() < 3) {
-                            usdTotal = (long) (orderRequest.getUsdAmount() * 1.05);
-                            buyerCommission = (long) 1.05;
+                            usdTotal = orderRequest.getUsdAmount() * 1.05;
+                            buyerCommission = 1.05;
                         } else if (bankAccount.getOrdersExecuted() < 6) {
-                            usdTotal = (long) (orderRequest.getUsdAmount() * 1.03);
-                            buyerCommission = (long) 1.03;
+                            usdTotal = orderRequest.getUsdAmount() * 1.03;
+                            buyerCommission = 1.03;
                         } else {
                             usdTotal = (orderRequest.getUsdAmount());
-                            buyerCommission = (long) 0;
+                            buyerCommission = 0.0;
 
                         }
 
@@ -111,7 +111,9 @@ public class OrderService {
                                                 .usdAmount(orderRequest.getUsdAmount())
                                                 .buyerCommission(buyerCommission)
                                                 .build();
-                                        return orderRepository.save(order);
+
+                                        return orderRepository.save(order)
+                                                .map(order1 -> modelMapper.map(order, OrderConfirmation.class));
                                     });
                         } else {
                             Order order = Order.builder()
@@ -121,21 +123,23 @@ public class OrderService {
                                     .buyerDni(orderRequest.getBuyerDni())
                                     .usdAmount(orderRequest.getUsdAmount())
                                     .build();
-                            return orderRepository.save(order);
+                            return orderRepository.save(order)
+                                    .map(order1 -> {
+                                        OrderConfirmation orderConfirmation = modelMapper.map(order, OrderConfirmation.class);
+                                        orderConfirmation.setErrorDescription("insufficient funds");
+                                        return orderConfirmation;
+                                    });
                         }
                     })
-                    .map(order -> modelMapper.map(order, OrderConfirmation.class))
                     .switchIfEmpty(orderConfirmationError(orderRequest.getId(), null, "User not found: " + orderRequest.getBuyerDni()))
-                    .map(orderConfirmation1-> {
-                        System.out.println(orderConfirmation1);
-                        Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE_H, QUEUES_EXCHANGE);
-                        return sender.send(outbound)
-                                .subscribe();
+                    .flatMap(orderConfirmation1 -> {
+                        Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE_G, QUEUES_EXCHANGE);
+                        return sender.send(outbound);
                     });
-        }).subscribe();
+        });
     }
 
-    public Disposable consume2() {
+    public Flux<Void> consume2() {
 
         return receiver.consumeAutoAck(QUEUE_F).flatMap(message -> {
 
@@ -159,8 +163,9 @@ public class OrderService {
                             return bankAccountRepository.findById(order.getBuyerDni())
                                     .flatMap(buyerAccount -> {
 
-                                        buyerAccount.setUsd(buyerAccount.getUsd() + order.getUsdAmount() * order.getBuyerCommission());
-
+                                        if (!Objects.equals(orderConfirmation.getErrorDescription(), "insufficient funds")){
+                                            buyerAccount.setUsd(buyerAccount.getUsd() + order.getUsdAmount() * order.getBuyerCommission());
+                                        }
                                         return bankAccountRepository.save(buyerAccount)
                                                 .then(orderRepository.save(order))
                                                 .map(order1 -> {
@@ -181,15 +186,18 @@ public class OrderService {
                                         return bankAccountRepository.findById(order.getBuyerDni())
                                                 .flatMap(buyerAccount -> {
 
-                                                    Long usdTotal;
+                                                    Double usdTotal = order.getUsdAmount();
+                                                    Double commission = 0.0;
+
                                                     if (sellerAccount.getOrdersExecuted() < 3) {
-                                                        usdTotal = (long) (order.getUsdAmount() * 1.05);
+
+                                                        commission = usdTotal * 0.05;
+
                                                     } else if (sellerAccount.getOrdersExecuted() < 6) {
-                                                        usdTotal = (long) (order.getUsdAmount() * 1.03);
-                                                    } else {
-                                                        usdTotal = (order.getUsdAmount());
+
+                                                        commission = usdTotal * 0.03;
                                                     }
-                                                    sellerAccount.setUsd(sellerAccount.getUsd() + usdTotal);
+                                                    sellerAccount.setUsd(sellerAccount.getUsd() + (usdTotal - commission));
                                                     sellerAccount.setOrdersExecuted(sellerAccount.getOrdersExecuted() + 1);
                                                     buyerAccount.setOrdersExecuted(buyerAccount.getOrdersExecuted() + 1);
 
@@ -211,16 +219,18 @@ public class OrderService {
                     }).switchIfEmpty(orderConfirmationError(orderConfirmation.getId(),
                             orderConfirmation.getSellerDni(), "Order not found: " + orderConfirmation.getId()))
 
-                    .map(orderConfirmation1 -> {
+                    .flatMap(orderConfirmation1 -> {
                         Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE_E, QUEUES_EXCHANGE);
 
-                        return sender.send(outbound)
-                                .subscribe();
+                        return sender.send(outbound);
                     });
-        }).subscribe();
+        });
     }
 
 
+    /**
+     * Facilitador para crear mensajes de error.
+     */
     public Mono<OrderConfirmation> orderConfirmationError(Long orderId, String sellerDni, String error) {
         return Mono.just(OrderConfirmation.builder()
                 .id(orderId)
@@ -230,6 +240,9 @@ public class OrderService {
                 .build());
     }
 
+    /**
+     * Se crea un mensaje, en el cual se especifica exchange, routing-key y cuerpo del mismo.
+     */
     private Flux<OutboundMessage> outboundMessage(Object message, String routingKey, String exchange) {
 
         String json;

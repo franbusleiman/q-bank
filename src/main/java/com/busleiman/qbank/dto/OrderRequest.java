@@ -13,7 +13,6 @@ import lombok.experimental.SuperBuilder;
 public class OrderRequest {
     private Long id;
     private String buyerDni;
-    private String sellerDni;
-    private Long usdAmount;
-    private Long javaCoinPrice;
+    private Double usdAmount;
+    private Double javaCoinPrice;
 }

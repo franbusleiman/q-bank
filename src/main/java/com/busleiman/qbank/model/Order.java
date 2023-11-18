@@ -14,9 +14,9 @@ public class Order  implements Persistable {
     private Long id;
     private String buyerDni;
     private String sellerDni;
-    private  Long usdAmount;
-    private Long buyerCommission;
-    private Long javaCoinPrice;
+    private  Double usdAmount;
+    private Double buyerCommission;
+    private Double javaCoinPrice;
     private OrderState orderState;
 
     @Override
