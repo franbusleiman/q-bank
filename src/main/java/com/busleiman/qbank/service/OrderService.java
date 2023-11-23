@@ -75,7 +75,7 @@ public class OrderService {
      * Si el saldo del comprador es suficiente, se guarda el mismo y se registra la orden,
      * si el saldo no es suficiente, se registra la orden fallida y se envía el mensaje de fondos
      * insuficientes.
-     * Finalmente se se envía el mensaje de confirmación al servicio Web.
+     * Finalmente se envía el mensaje de confirmación al servicio Web.
      */
     public Flux<Void> consume() {
 
@@ -143,6 +143,8 @@ public class OrderService {
                     .switchIfEmpty(orderConfirmationError(orderRequest.getId(), null, "User not found: " + orderRequest.getBuyerDni()))
                     .flatMap(orderConfirmation1 -> {
                         Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE_G, QUEUES_EXCHANGE);
+
+
                         return sender.send(outbound);
                     });
         });
@@ -172,7 +174,6 @@ public class OrderService {
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
             }
-
             return orderRepository.findById(orderConfirmation.getId())
                     .flatMap(order -> {
 
@@ -180,7 +181,6 @@ public class OrderService {
 
                             order.setOrderState(OrderState.NOT_ACCEPTED);
                             order.setSellerDni(orderConfirmation.getSellerDni());
-
 
                             return bankAccountRepository.findById(order.getBuyerDni())
                                     .flatMap(buyerAccount -> {
@@ -243,7 +243,6 @@ public class OrderService {
 
                     .flatMap(orderConfirmation1 -> {
                         Flux<OutboundMessage> outbound = outboundMessage(orderConfirmation1, QUEUE_E, QUEUES_EXCHANGE);
-
                         return sender.send(outbound);
                     });
         });
