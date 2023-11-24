@@ -104,7 +104,6 @@ public class OrderService {
                         } else {
                             usdTotal = (orderRequest.getUsdAmount());
                             buyerCommission = 0.0;
-
                         }
 
                         if (usdTotal <= bankAccount.getUsd()) {
